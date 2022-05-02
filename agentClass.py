@@ -41,8 +41,7 @@ class TQAgent:
             self.q_tables[i] = {}
 
         self.cur_board_str = ''
-        self.action = {'pos': -1,
-            'or': -1}
+        self.action = np.array([-1, -1])
         self.tile_idx = -1
 
 
@@ -109,8 +108,7 @@ class TQAgent:
         or_idx = max_ids[1][rand_idx]
         print(pos_idx, or_idx)
 
-        self.action['pos'] = pos_idx
-        self.action['or'] = or_idx
+        self.action = np.array([pos_idx, or_idx])
 
         if self.gameboard.fn_move(pos_idx, or_idx) == 1:
             print("move invalid")
