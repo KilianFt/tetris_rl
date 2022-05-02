@@ -24,31 +24,26 @@ class TQAgent:
         # This function should not return a value, store Q table etc as attributes of self
 
         # Useful variables: 
-        # 'gameboard.N_row' number of rows in gameboard
-        # 'gameboard.N_col' number of columns in gameboard
-        # 'len(gameboard.tiles)' number of different tiles
         # 'self.episode_count' the total number of episodes in the training
 
-        # self.state = np.zeros((gameboard.N_row, gameboard.N_col))
         self.q_tables = {}
-        self.tile_actions = {}
+        self.initial_q_table_shape = {}
+
         # get all the possible tiles
         for i, tile in enumerate(gameboard.tiles):
-            print(i)
-            print(tile)
             n_orientations = len(tile)
 
             max_n = np.max(list(map(max, tile)))
-            print("max", max_n)
             n_positions = 1 + (gameboard.N_col - max_n)
-            n_actions = n_orientations + n_positions
-            print("n_actions ", n_actions, " n_pos ", n_positions, " n_or ", n_orientations)
+
+            print("n pos ",n_positions , " n or ", n_orientations)
+            self.initial_q_table_shape[i] = np.zeros((n_positions, n_orientations))
             self.q_tables[i] = {}
 
-
-        self.board_str = ''
-        self.action = -1
-        self.tile = -1
+        self.cur_board_str = ''
+        self.action = {'pos': -1,
+            'or': -1}
+        self.tile_idx = -1
 
 
     def fn_load_strategy(self,strategy_file):
@@ -75,7 +70,7 @@ class TQAgent:
             board_str += str(x)
 
         self.board_str = board_str
-        self.tile = self.gameboard.cur_tile_type
+        self.tile_idx = self.gameboard.cur_tile_type
 
     def fn_select_action(self):
         
@@ -96,17 +91,30 @@ class TQAgent:
         # You can use this function to map out which actions are valid or not
 
         # get q table for current state
-        if self.q_tables[self.tile].has_key(self.state_str):
-            q_table = self.q_table[self.tile][self.state_str]
+        print("get q table of tile ", self.tile_idx)
+        if self.board_str in self.q_tables[self.tile_idx]:
+            q_table = self.q_tables[self.tile_idx][self.board_str]
         else:
             # initialize new 0 q table
+            q_table = self.initial_q_table_shape[self.tile_idx]
+            self.q_tables[self.tile_idx][self.board_str] = q_table
 
-            q_table = np.zeros((self.gameboard.N_row, self.gameboard.N_col))
-            self.q_table[self.tile][self.state_str] = q_table
+        print(q_table)
 
-        # get argmax of q_table, chose randomely otherwise
+        max_ids = np.where(q_table == np.max(q_table))
+        n_max = len(max_ids[0])
+        rand_idx = np.random.randint(0, n_max)
 
-    
+        pos_idx = max_ids[0][rand_idx]
+        or_idx = max_ids[1][rand_idx]
+        print(pos_idx, or_idx)
+
+        self.action['pos'] = pos_idx
+        self.action['or'] = or_idx
+
+        if self.gameboard.fn_move(pos_idx, or_idx) == 1:
+            print("move invalid")
+
     def fn_reinforce(self,old_state,reward):
         pass
         # TO BE COMPLETED BY STUDENT
