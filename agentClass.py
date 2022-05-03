@@ -19,15 +19,6 @@ class TQAgent:
 
     def fn_init(self,gameboard):
         self.gameboard=gameboard
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # In this function you could set up and initialize the states, actions and Q-table and storage for the rewards
-        # This function should not return a value, store Q table etc as attributes of self
-
-        # Useful variables: 
-        # 'self.episode_count' the total number of episodes in the training
-
         self.q_tables = {}
         self.initial_q_table_shape = {}
 
@@ -36,12 +27,9 @@ class TQAgent:
         # get all the possible tiles
         for i, tile in enumerate(gameboard.tiles):
             n_orientations = len(tile)
-
             actions = {}
 
             for or_idx in range(n_orientations):
-
-                # max_n = np.max(list(map(max, tile)))
                 n_positions = 1 + gameboard.N_col - len(tile[or_idx])
                 actions[or_idx] = np.zeros(n_positions)
 
@@ -51,6 +39,7 @@ class TQAgent:
         self.cur_board_str = ''
         self.action = (-1, -1)
         self.tile_idx = -1
+
 
     def fn_load_strategy(self,strategy_file):
         pass
@@ -78,10 +67,12 @@ class TQAgent:
         return q_table
 
     def get_max_q(self, q_table):
-        q_max = -1000
+        q_max = None
         
         for positions in q_table.values():
             curr_max = np.max(positions)
+            if q_max is None:
+                q_max = curr_max
             if curr_max > q_max:
                 q_max = curr_max
 
@@ -92,7 +83,6 @@ class TQAgent:
         max_idxs = []
         for o_idx, positions in q_table.items():
             for p_idx, q_val in enumerate(positions):
-                # q_val = positions[p_idx]
                 if q_val == max_q:
                     max_idxs.append((o_idx, p_idx))
 
@@ -113,32 +103,29 @@ class TQAgent:
         n_max = len(max_idxs)
         rand_idx = np.random.randint(0, n_max)
 
-        self.action = max_idxs[rand_idx]
+        r = np.random.rand()
+        if r < self.epsilon:
+            # chose random action
+            o_len = len(q_table)
+            rand_o = np.random.randint(0, o_len)
 
-        if self.gameboard.fn_move(self.action[0], self.action[1]) == 1:
+            p_len = len(q_table[rand_o])
+            rand_p = np.random.randint(0, p_len)
+
+            self.action = (rand_o, rand_p)
+        else:
+            self.action = max_idxs[rand_idx]
+
+        if self.gameboard.fn_move(self.action[1], self.action[0]) == 1:
             print("move invalid")
 
     def fn_reinforce(self,old_state,reward):
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # Update the Q table using state and action stored as attributes in self and using function arguments for the old state and the reward
-        # This function should not return a value, the Q table is stored as an attribute of self
-
-        # Useful variables: 
-        # 'self.alpha' learning rate
-
-        # use last tile idx cause tile idx might already be updated
-        # print("next board str", self.board_str)
-        # print("last board str", old_state)
-
         last_board_str = old_state[0]
         last_tile_idx = old_state[1]
 
         q_table_next_state = self.get_q_table(self.board_str, last_tile_idx)
-        # print("q next", q_table_next_state)
         max_next_state = self.get_max_q(q_table_next_state)
-        # print("max q next ", max_next_state)    
+
         # get entry in q table of current state with current action
         q_table_state = self.get_q_table(last_board_str, last_tile_idx)
 
@@ -147,10 +134,6 @@ class TQAgent:
         q_state_updated = q_state + self.alpha * (reward + max_next_state - q_state)
 
         self.q_tables[last_tile_idx][last_board_str][self.action[0]][self.action[1]] = copy.deepcopy(q_state_updated)
-
-        # print("q state", q_state)
-        # print("q state updated", q_state_updated)
-        # print("q tables updated", self.q_tables[self.last_tile_idx])
 
         return
 
@@ -163,9 +146,9 @@ class TQAgent:
             if self.episode%1000==0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    pass
-                    # TO BE COMPLETED BY STUDENT
-                    # Here you can save the rewards and the Q-table to data files for plotting of the rewards and the Q-table can be used to test how the agent plays
+                    np.save('rewards.npy', self.reward_tots)
+                    np.save('q_tables.npy', self.q_tables)
+                    
             if self.episode>=self.episode_count:
                 raise SystemExit(0)
             else:
@@ -173,8 +156,7 @@ class TQAgent:
         else:
             # Select and execute action (move the tile to the desired column and orientation)
             self.fn_select_action()
-            # TO BE COMPLETED BY STUDENT
-            # Here you should write line(s) to copy the old state into the variable 'old_state' which is later passed to fn_reinforce()
+
             old_state = [copy.deepcopy(self.board_str), copy.deepcopy(self.tile_idx)]
 
             # Drop the tile on the game board
