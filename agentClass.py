@@ -4,6 +4,10 @@ import random
 import math
 import h5py
 import copy
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
 # This file provides the skeleton structure for the classes TQAgent and TDQNAgent to be completed by you, the student.
 # Locations starting with # TO BE COMPLETED BY STUDENT indicates missing code that should be written by you.
@@ -97,8 +101,6 @@ class TQAgent:
         # get q table for current state
         q_table = self.get_q_table(self.board_str, self.tile_idx)
 
-
-        # max_idss = np.where(q_table == np.max(q_table))
         max_idxs = self.get_best_actions(q_table)
         n_max = len(max_idxs)
         rand_idx = np.random.randint(0, n_max)
@@ -169,6 +171,21 @@ class TQAgent:
             self.fn_reinforce(old_state, reward)
 
 
+class Net(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(state_size, 64)
+        self.fc2 = nn.Linear(64, action_size)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return x
+
+def criterion(q_val, y):
+    loss = torch.square((q_val - y))
+    return loss
+
 class TDQNAgent:
     # Agent for learning to play tetris using Q-learning
     def __init__(self,alpha,epsilon,epsilon_scale,replay_buffer_size,batch_size,sync_target_episode_count,episode_count):
@@ -198,6 +215,16 @@ class TDQNAgent:
         # 'self.alpha' the learning rate for stochastic gradient descent
         # 'self.episode_count' the total number of episodes in the training
         # 'self.replay_buffer_size' the number of quadruplets stored in the experience replay buffer
+
+        state_size = gameboard.N_row * gameboard.N_col
+        action_size = gameboard.N_col + 4
+
+        self.q_nn = Net(state_size=state_size, action_size=action_size)
+
+        self.q_nn_hat = copy.deepcopy(self.q_nn)
+
+        learning_rate = 1e-3
+        self.optimizer = optim.Adam(self.q_nn.parameters(), lr=learning_rate)
 
     def fn_load_strategy(self,strategy_file):
         pass
@@ -238,6 +265,11 @@ class TDQNAgent:
         # The function returns 1 if the action is not valid and 0 otherwise
         # You can use this function to map out which actions are valid or not
 
+        output = self.q_nn(input)
+
+        self.gameboard.fn_move(tile_x, tile_orientation)
+
+
     def fn_reinforce(self,batch):
         pass
         # TO BE COMPLETED BY STUDENT
@@ -250,6 +282,13 @@ class TDQNAgent:
 
         # Useful variables: 
         # The input argument 'batch' contains a sample of quadruplets used to update the Q-network
+
+        # in your training loop:
+        self.optimizer.zero_grad()   # zero the gradient buffers
+        output = self.q_nn(input)
+        loss = criterion(output, target)
+        loss.backward()
+        self.optimizer.step()    # Does the update
 
     def fn_turn(self):
         if self.gameboard.gameover:
@@ -269,6 +308,8 @@ class TDQNAgent:
                     pass
                     # TO BE COMPLETED BY STUDENT
                     # Here you should write line(s) to copy the current network to the target network
+                    self.q_nn_hat = copy.deepcopy(self.q_nn)
+
                 self.gameboard.fn_restart()
         else:
             # Select and execute action (move the tile to the desired column and orientation)
