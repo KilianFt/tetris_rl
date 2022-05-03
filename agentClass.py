@@ -217,22 +217,35 @@ class TDQNAgent:
         # 'self.replay_buffer_size' the number of quadruplets stored in the experience replay buffer
 
         state_size = gameboard.N_row * gameboard.N_col
-        action_size = gameboard.N_col + 4
+        # indexes are pos.or, so 2.3 would be position 2 with orientation 3
+        # [1.1, 1.2, 1.3, 1.4, 2.1 ...]
+        action_size = gameboard.N_col * 4
 
-        self.q_nn = Net(state_size=state_size, action_size=action_size)
+        self.q_nn = Net(state_size = state_size, action_size = action_size)
 
         self.q_nn_hat = copy.deepcopy(self.q_nn)
 
         learning_rate = 1e-3
         self.optimizer = optim.Adam(self.q_nn.parameters(), lr=learning_rate)
 
-    def fn_load_strategy(self,strategy_file):
+        possible_actions = {}
+        for i, tile in enumerate(gameboard.tiles):
+            tile_actions = {}
+            for o_idx in range(len(tile)):
+                n_positions = 1 + gameboard.N_col - len(tile[o_idx])
+                tile_actions[o_idx] = n_positions
+
+            possible_actions[i] = tile_actions
+
+        self.possible_actions = possible_actions
+
+    def fn_load_strategy(self, strategy_file):
         pass
         # TO BE COMPLETED BY STUDENT
         # Here you can load the Q-network (to Q-network of self) from the strategy_file
 
     def fn_read_state(self):
-        pass
+        
         # TO BE COMPLETED BY STUDENT
         # This function should be written by you
         # Instructions:
@@ -240,14 +253,11 @@ class TDQNAgent:
         # You can for example represent the state as a copy of the game board and the identifier of the current tile
         # This function should not return a value, store the state as an attribute of self
 
-        # Useful variables: 
-        # 'self.gameboard.N_row' number of rows in gameboard
-        # 'self.gameboard.N_col' number of columns in gameboard
-        # 'self.gameboard.board[index_row,index_col]' table indicating if row 'index_row' and column 'index_col' is occupied (+1) or free (-1)
-        # 'self.gameboard.cur_tile_type' identifier of the current tile that should be placed on the game board (integer between 0 and len(self.gameboard.tiles))
+        self.board = self.gameboard.board.flatten()
+        self.tile_idx = self.gameboard.cur_tile_type
+
 
     def fn_select_action(self):
-        pass
         # TO BE COMPLETED BY STUDENT
         # This function should be written by you
         # Instructions:
@@ -258,16 +268,32 @@ class TDQNAgent:
         # 'self.epsilon' parameter epsilon in epsilon-greedy policy
         # 'self.epsilon_scale' parameter for the scale of the episode number where epsilon_N changes from unity to epsilon
 
-        # Useful functions
-        # 'self.gameboard.fn_move(tile_x,tile_orientation)' use this function to execute the selected action
-        # The input argument 'tile_x' contains the column of the tile (0 <= tile_x < self.gameboard.N_col)
-        # The input argument 'tile_orientation' contains the number of 90 degree rotations of the tile (0 < tile_orientation < # of non-degenerate rotations)
-        # The function returns 1 if the action is not valid and 0 otherwise
-        # You can use this function to map out which actions are valid or not
+        curr_e_scale = 1 - self.episode / self.epsilon_scale
+        curr_epsilon = np.max([self.epsilon, curr_e_scale])
 
-        output = self.q_nn(input)
+        tile_actions = self.possible_actions[self.tile_idx]
 
-        self.gameboard.fn_move(tile_x, tile_orientation)
+        r = np.random.rand()
+        if r < curr_epsilon:
+            # chose random action
+            o_rand = np.random.randint(0, len(tile_actions))
+            p_rand = np.random.randint(0, len(tile_actions[o_rand]))
+            action = (p_rand, o_rand)
+            self.gameboard.fn_move(p_rand, o_rand)
+
+        else:
+            # chose action with highest q_val
+            one_hot_tile = [i if i == self.tile else 0 for i in range(len(self.gameboard.tiles)) ]
+            flat_state = np.hstack([self.board, one_hot_tile])
+            output = self.q_nn(flat_state)
+
+            max_idxs = np.argsort(output)
+            for idx in max_idxs:
+                o_idx = idx % 4
+                p_idx = np.floor(idx / 4)
+                if not self.gameboard.fn_move(p_idx, o_idx) == 1:
+                    action = (p_idx, o_idx)
+                    break
 
 
     def fn_reinforce(self,batch):
@@ -286,6 +312,11 @@ class TDQNAgent:
         # in your training loop:
         self.optimizer.zero_grad()   # zero the gradient buffers
         output = self.q_nn(input)
+        if epison_ended:
+            target = reward
+        else:
+            max_q_nn_hat
+            target = reward + max_q_nn_hat
         loss = criterion(output, target)
         loss.backward()
         self.optimizer.step()    # Does the update
