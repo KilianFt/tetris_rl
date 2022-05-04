@@ -217,7 +217,8 @@ class TDQNAgent:
         # 'self.episode_count' the total number of episodes in the training
         # 'self.replay_buffer_size' the number of quadruplets stored in the experience replay buffer
 
-        state_size = gameboard.N_row * gameboard.N_col
+        n_tiles = len(gameboard.tiles)
+        state_size = gameboard.N_row * gameboard.N_col + n_tiles
         # indexes are pos.or, so 2.3 would be position 2 with orientation 3
         # [1.1, 1.2, 1.3, 1.4, 2.1 ...]
         action_size = gameboard.N_col * 4
@@ -240,6 +241,10 @@ class TDQNAgent:
 
         self.possible_actions = possible_actions
 
+        self.exp_buffer = []
+        self.reward_tots = np.zeros(self.episode_count)
+
+
     def fn_load_strategy(self, strategy_file):
         pass
         # TO BE COMPLETED BY STUDENT
@@ -256,6 +261,11 @@ class TDQNAgent:
 
         self.board = self.gameboard.board.flatten()
         self.tile_idx = self.gameboard.cur_tile_type
+
+        one_hot_tile = [1 if i == self.tile_idx else 0 for i in range(len(self.gameboard.tiles))]
+        flat_state = np.hstack([self.board, one_hot_tile])
+
+        self.state = flat_state
 
 
     def fn_select_action(self):
@@ -278,22 +288,25 @@ class TDQNAgent:
         if r < curr_epsilon:
             # chose random action
             o_rand = np.random.randint(0, len(tile_actions))
-            p_rand = np.random.randint(0, len(tile_actions[o_rand]))
-            action = (p_rand, o_rand)
+            p_rand = np.random.randint(0, tile_actions[o_rand])
+            self.action = (p_rand, o_rand)
             self.gameboard.fn_move(p_rand, o_rand)
 
         else:
             # chose action with highest q_val
-            one_hot_tile = [i if i == self.tile else 0 for i in range(len(self.gameboard.tiles)) ]
-            flat_state = np.hstack([self.board, one_hot_tile])
-            output = self.q_nn(flat_state)
+
+            print("state", self.state)
+            state_tensor = torch.from_numpy(self.state)
+            output = self.q_nn(state_tensor)
 
             max_idxs = np.argsort(output)
             for idx in max_idxs:
-                o_idx = idx % 4
-                p_idx = np.floor(idx / 4)
+
+                # FIXME check if this makes sense
+                o_idx = idx % self.gameboard.N_col
+                p_idx = np.floor(idx / self.gameboard.N_col)
                 if not self.gameboard.fn_move(p_idx, o_idx) == 1:
-                    action = (p_idx, o_idx)
+                    self.action = (p_idx, o_idx)
                     break
 
 
@@ -311,16 +324,35 @@ class TDQNAgent:
         # The input argument 'batch' contains a sample of quadruplets used to update the Q-network
 
         # in your training loop:
-        self.optimizer.zero_grad()   # zero the gradient buffers
-        output = self.q_nn(input)
-        if epison_ended:
-            target = reward
-        else:
-            max_q_nn_hat
-            target = reward + max_q_nn_hat
-        loss = criterion(output, target)
-        loss.backward()
-        self.optimizer.step()    # Does the update
+        for entry in batch:
+            reward = entry['reward']
+            old_state = entry['old_state']
+            new_state = entry['new_state']
+            action = entry['action']
+
+            self.optimizer.zero_grad()   # zero the gradient buffers
+            output = self.q_nn(old_state)
+
+            output_hat = self.q_nn_hat(new_state)
+
+
+
+            # find out if state is terminal state
+            if self.gameboard.gameover:
+                target_reward = reward
+            else:
+                max_q_nn_hat = np.max(output_hat)
+                target_reward = reward + max_q_nn_hat
+
+            # put reward value in action position
+            # FIXME check if this makes sense
+            reward_pos = action[0] * self.gameboard.N_col + action[1]
+
+            target = [target_reward if i == reward_pos else 0 for i in range(len(output))]
+
+            loss = criterion(output, target)
+            loss.backward()
+            self.optimizer.step()    # Does the update
 
     def fn_turn(self):
         if self.gameboard.gameover:
@@ -348,22 +380,37 @@ class TDQNAgent:
             self.fn_select_action()
             # TO BE COMPLETED BY STUDENT
             # Here you should write line(s) to copy the old state into the variable 'old_state' which is later stored in the ecperience replay buffer
+            old_state = copy.deepcopy(self.state)
 
             # Drop the tile on the game board
             reward=self.gameboard.fn_drop()
 
             # TO BE COMPLETED BY STUDENT
             # Here you should write line(s) to add the current reward to the total reward for the current episode, so you can save it to disk later
+            self.reward_tots[self.episode] += reward
 
             # Read the new state
             self.fn_read_state()
 
-            # TO BE COMPLETED BY STUDENT
-            # Here you should write line(s) to store the state in the experience replay buffer
+            new_state = self.state
+            action = self.action
+            quadruplet = {'old_state': old_state,
+                'action': action,
+                'reward': reward,
+                'new_state': new_state}
+
+            if self.episode < self.replay_buffer_size:
+                self.exp_buffer.append(copy.deepcopy(quadruplet))
+            else:
+                self.exp_buffer.pop(0)
+                self.exp_buffer.append(copy.deepcopy(quadruplet))
+
+                print("ERROR wrong buffer size") if not len(self.exp_buffer) == self.replay_buffer_size else 0
 
             if len(self.exp_buffer) >= self.replay_buffer_size:
                 # TO BE COMPLETED BY STUDENT
                 # Here you should write line(s) to create a variable 'batch' containing 'self.batch_size' quadruplets 
+                batch = random.choices(self.exp_buffer, k = self.batch_size)
                 self.fn_reinforce(batch)
 
 
