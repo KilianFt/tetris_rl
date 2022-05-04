@@ -186,9 +186,9 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         return x
 
-# def criterion(q_val, y):
-#     loss = torch.square((q_val - y))
-#     return loss
+def criterion(q_val, y):
+    loss = torch.square((q_val - y))
+    return loss
 
 class TDQNAgent:
     # Agent for learning to play tetris using Q-learning
@@ -205,21 +205,6 @@ class TDQNAgent:
 
     def fn_init(self,gameboard):
         self.gameboard=gameboard
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # In this function you could set up and initialize the states, actions, the Q-networks (one for calculating actions and one target network), experience replay buffer and storage for the rewards
-        # You can use any framework for constructing the networks, for example pytorch or tensorflow
-        # This function should not return a value, store Q network etc as attributes of self
-
-        # Useful variables: 
-        # 'gameboard.N_row' number of rows in gameboard
-        # 'gameboard.N_col' number of columns in gameboard
-        # 'len(gameboard.tiles)' number of different tiles
-        # 'self.alpha' the learning rate for stochastic gradient descent
-        # 'self.episode_count' the total number of episodes in the training
-        # 'self.replay_buffer_size' the number of quadruplets stored in the experience replay buffer
-
         n_tiles = len(gameboard.tiles)
         state_size = gameboard.N_row * gameboard.N_col + n_tiles
         # indexes are pos.or, so 2.3 would be position 2 with orientation 3
@@ -231,17 +216,12 @@ class TDQNAgent:
         print("state size", state_size)
         hidden_size = 64
 
-        self.q_nn = Net(state_size = state_size, action_size = action_size, hidden_size = hidden_size)#.to(device)
-        # self.q_nn.to(torch.double)
+        self.q_nn = Net(state_size = state_size, action_size = action_size, hidden_size = hidden_size)
         print(self.q_nn)
-
-        X = torch.rand(state_size)
-        print("type", X.dtype)
-        print("out", self.q_nn(X))
 
         self.q_nn_hat = copy.deepcopy(self.q_nn)
 
-        learning_rate = 1e-3
+        learning_rate = 1e-4
         self.optimizer = optim.Adam(self.q_nn.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
 
@@ -266,14 +246,6 @@ class TDQNAgent:
         # Here you can load the Q-network (to Q-network of self) from the strategy_file
 
     def fn_read_state(self):
-        
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # In this function you could calculate the current state of the gane board
-        # You can for example represent the state as a copy of the game board and the identifier of the current tile
-        # This function should not return a value, store the state as an attribute of self
-
         self.board = self.gameboard.board.flatten()
         self.tile_idx = self.gameboard.cur_tile_type
 
@@ -282,16 +254,6 @@ class TDQNAgent:
         self.state = torch.from_numpy(flat_state).to(torch.float32)
 
     def fn_select_action(self):
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # Choose and execute an action, based on the output of the Q-network for the current state, or random if epsilon greedy
-        # This function should not return a value, store the action as an attribute of self and exectute the action by moving the tile to the desired position and orientation
-
-        # Useful variables: 
-        # 'self.epsilon' parameter epsilon in epsilon-greedy policy
-        # 'self.epsilon_scale' parameter for the scale of the episode number where epsilon_N changes from unity to epsilon
-
         curr_e_scale = 1 - self.episode / self.epsilon_scale
         curr_epsilon = np.max([self.epsilon, curr_e_scale])
 
@@ -306,30 +268,18 @@ class TDQNAgent:
             self.gameboard.fn_move(p_rand, o_rand)
 
         else:
-            new_action = False
             # chose action with highest q_val
             with torch.no_grad():
-                # tensor = self.state.to(device)
                 output = self.q_nn(self.state)
 
+            # FIXME make sure that all top are taken randomely
             max_idxs = np.flip(np.argsort(output.detach().numpy()))
-            # print("max idxs", max_idxs)
             for idx in max_idxs:
-
-                # FIXME check if this makes sense
                 o_idx = idx % self.gameboard.N_col
                 p_idx = idx // self.gameboard.N_col
                 if not self.gameboard.fn_move(p_idx, o_idx) == 1:
                     self.action = (p_idx, o_idx)
-                    # print("idx", idx)
-                    new_action = True
-
                     break
-
-            if not new_action:
-                print("No new action")
-
-            # print(self.action)
 
 
     def fn_reinforce(self, batch):
@@ -359,43 +309,53 @@ class TDQNAgent:
 
         self.optimizer.zero_grad()
 
-        # old_tensor = old_state.to(device)
         output = self.q_nn(old_states)
-
-        # new_tensor = new_state.to(device)
         output_hat = self.q_nn_hat(new_states)
         
         targets = torch.Tensor(self.batch_size, self.action_size)
+        target_vals = torch.Tensor(self.batch_size, 1)
+        output_vals = torch.Tensor(self.batch_size, 1)
+
         for i, (action, reward) in enumerate(zip(actions, rewards)):
             reward_pos = action[0] * self.gameboard.N_col + action[1]
             # find out if state is terminal state
-            if self.gameboard.gameover:
-                # target_reward = reward
-                target_list = [reward if i == reward_pos else 0 for i in range(len(output[i]))]
-                target = torch.Tensor(target_list)
+            out_hat = output_hat[i]
+            
+            if reward == -100:
+                target_reward = reward
+                # target_list = [reward if i == reward_pos else 0 for i in range(len(output[i]))]
+                # target = torch.Tensor(target_list)
+                out_hat[reward_pos] += reward
             else:
-                out_hat = output_hat[i]
-                # max_q_nn_hat = np.max(out_hat.detach().numpy())
-                # target_reward = reward + max_q_nn_hat
+                
+                max_q_nn_hat = np.max(out_hat.detach().numpy())
+                target_reward = reward + max_q_nn_hat
 
-                out_hat[reward_pos] += reward#target_reward
-                target = out_hat
+                out_hat[reward_pos] += target_reward
 
+            target_vals[i] = target_reward
+            output_vals[i] = output[i][reward_pos]
+            target = out_hat
             targets[i] = target
 
+        # print("reward", rewards[0])
+        # print("output", output[0])
+        # print("target", targets[0])
 
-        loss = self.criterion(output, targets)
-        # loss = criterion(output, targets)
+        # loss = self.criterion(output_vals, target_vals)
+        loss = criterion(output_vals, target_vals)
         # print("loss", loss)
-        loss.backward()
+        loss.mean().backward()
+        # loss.backward()
+
         self.optimizer.step()
 
     def fn_turn(self):
         if self.gameboard.gameover:
-            self.episode+=1
-            if self.episode%100==0:
+            self.episode += 1
+            if self.episode % 100==0:
                 print('episode '+str(self.episode)+'/'+str(self.episode_count)+' (reward: ',str(np.sum(self.reward_tots[range(self.episode-100,self.episode)])),')')
-            if self.episode%1000==0:
+            if self.episode % 1000 == 0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
                     pass
