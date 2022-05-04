@@ -12,6 +12,9 @@ import torch.optim as optim
 # This file provides the skeleton structure for the classes TQAgent and TDQNAgent to be completed by you, the student.
 # Locations starting with # TO BE COMPLETED BY STUDENT indicates missing code that should be written by you.
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using {device} device")
+
 class TQAgent:
     # Agent for learning to play tetris using Q-learning
     def __init__(self,alpha,epsilon,episode_count):
@@ -173,19 +176,19 @@ class TQAgent:
 
 
 class Net(nn.Module):
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size, action_size, hidden_size):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(state_size, 64)
-        self.fc2 = nn.Linear(64, action_size)
+        self.fc1 = nn.Linear(state_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, action_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         return x
 
-def criterion(q_val, y):
-    loss = torch.square((q_val - y))
-    return loss
+# def criterion(q_val, y):
+#     loss = torch.square((q_val - y))
+#     return loss
 
 class TDQNAgent:
     # Agent for learning to play tetris using Q-learning
@@ -223,12 +226,24 @@ class TDQNAgent:
         # [1.1, 1.2, 1.3, 1.4, 2.1 ...]
         action_size = gameboard.N_col * 4
 
-        self.q_nn = Net(state_size = state_size, action_size = action_size)
+        self.action_size = action_size
+        self.state_size = state_size
+        print("state size", state_size)
+        hidden_size = 64
+
+        self.q_nn = Net(state_size = state_size, action_size = action_size, hidden_size = hidden_size)#.to(device)
+        # self.q_nn.to(torch.double)
+        print(self.q_nn)
+
+        X = torch.rand(state_size)
+        print("type", X.dtype)
+        print("out", self.q_nn(X))
 
         self.q_nn_hat = copy.deepcopy(self.q_nn)
 
         learning_rate = 1e-3
         self.optimizer = optim.Adam(self.q_nn.parameters(), lr=learning_rate)
+        self.criterion = nn.MSELoss()
 
         possible_actions = {}
         for i, tile in enumerate(gameboard.tiles):
@@ -264,9 +279,7 @@ class TDQNAgent:
 
         one_hot_tile = [1 if i == self.tile_idx else 0 for i in range(len(self.gameboard.tiles))]
         flat_state = np.hstack([self.board, one_hot_tile])
-
-        self.state = flat_state
-
+        self.state = torch.from_numpy(flat_state).to(torch.float32)
 
     def fn_select_action(self):
         # TO BE COMPLETED BY STUDENT
@@ -293,25 +306,33 @@ class TDQNAgent:
             self.gameboard.fn_move(p_rand, o_rand)
 
         else:
+            new_action = False
             # chose action with highest q_val
+            with torch.no_grad():
+                # tensor = self.state.to(device)
+                output = self.q_nn(self.state)
 
-            print("state", self.state)
-            state_tensor = torch.from_numpy(self.state)
-            output = self.q_nn(state_tensor)
-
-            max_idxs = np.argsort(output)
+            max_idxs = np.flip(np.argsort(output.detach().numpy()))
+            # print("max idxs", max_idxs)
             for idx in max_idxs:
 
                 # FIXME check if this makes sense
                 o_idx = idx % self.gameboard.N_col
-                p_idx = np.floor(idx / self.gameboard.N_col)
+                p_idx = idx // self.gameboard.N_col
                 if not self.gameboard.fn_move(p_idx, o_idx) == 1:
                     self.action = (p_idx, o_idx)
+                    # print("idx", idx)
+                    new_action = True
+
                     break
 
+            if not new_action:
+                print("No new action")
 
-    def fn_reinforce(self,batch):
-        pass
+            # print(self.action)
+
+
+    def fn_reinforce(self, batch):
         # TO BE COMPLETED BY STUDENT
         # This function should be written by you
         # Instructions:
@@ -324,35 +345,50 @@ class TDQNAgent:
         # The input argument 'batch' contains a sample of quadruplets used to update the Q-network
 
         # in your training loop:
-        for entry in batch:
-            reward = entry['reward']
+        actions = []
+        rewards = []
+        old_states = torch.Tensor(self.batch_size, self.state_size)
+        new_states = torch.Tensor(self.batch_size, self.state_size)
+        for i, entry in enumerate(batch):
+            rewards.append(entry['reward'])
             old_state = entry['old_state']
             new_state = entry['new_state']
-            action = entry['action']
+            actions.append(entry['action'])
+            old_states[i] = old_state
+            new_states[i] = new_state
 
-            self.optimizer.zero_grad()   # zero the gradient buffers
-            output = self.q_nn(old_state)
+        self.optimizer.zero_grad()
 
-            output_hat = self.q_nn_hat(new_state)
+        # old_tensor = old_state.to(device)
+        output = self.q_nn(old_states)
 
-
-
+        # new_tensor = new_state.to(device)
+        output_hat = self.q_nn_hat(new_states)
+        
+        targets = torch.Tensor(self.batch_size, self.action_size)
+        for i, (action, reward) in enumerate(zip(actions, rewards)):
+            reward_pos = action[0] * self.gameboard.N_col + action[1]
             # find out if state is terminal state
             if self.gameboard.gameover:
-                target_reward = reward
+                # target_reward = reward
+                target_list = [reward if i == reward_pos else 0 for i in range(len(output[i]))]
+                target = torch.Tensor(target_list)
             else:
-                max_q_nn_hat = np.max(output_hat)
-                target_reward = reward + max_q_nn_hat
+                out_hat = output_hat[i]
+                # max_q_nn_hat = np.max(out_hat.detach().numpy())
+                # target_reward = reward + max_q_nn_hat
 
-            # put reward value in action position
-            # FIXME check if this makes sense
-            reward_pos = action[0] * self.gameboard.N_col + action[1]
+                out_hat[reward_pos] += reward#target_reward
+                target = out_hat
 
-            target = [target_reward if i == reward_pos else 0 for i in range(len(output))]
+            targets[i] = target
 
-            loss = criterion(output, target)
-            loss.backward()
-            self.optimizer.step()    # Does the update
+
+        loss = self.criterion(output, targets)
+        # loss = criterion(output, targets)
+        # print("loss", loss)
+        loss.backward()
+        self.optimizer.step()
 
     def fn_turn(self):
         if self.gameboard.gameover:
@@ -369,24 +405,18 @@ class TDQNAgent:
                 raise SystemExit(0)
             else:
                 if (len(self.exp_buffer) >= self.replay_buffer_size) and ((self.episode % self.sync_target_episode_count)==0):
-                    pass
-                    # TO BE COMPLETED BY STUDENT
-                    # Here you should write line(s) to copy the current network to the target network
                     self.q_nn_hat = copy.deepcopy(self.q_nn)
 
                 self.gameboard.fn_restart()
         else:
             # Select and execute action (move the tile to the desired column and orientation)
             self.fn_select_action()
-            # TO BE COMPLETED BY STUDENT
-            # Here you should write line(s) to copy the old state into the variable 'old_state' which is later stored in the ecperience replay buffer
+
             old_state = copy.deepcopy(self.state)
 
             # Drop the tile on the game board
-            reward=self.gameboard.fn_drop()
+            reward = self.gameboard.fn_drop()
 
-            # TO BE COMPLETED BY STUDENT
-            # Here you should write line(s) to add the current reward to the total reward for the current episode, so you can save it to disk later
             self.reward_tots[self.episode] += reward
 
             # Read the new state
@@ -408,8 +438,6 @@ class TDQNAgent:
                 print("ERROR wrong buffer size") if not len(self.exp_buffer) == self.replay_buffer_size else 0
 
             if len(self.exp_buffer) >= self.replay_buffer_size:
-                # TO BE COMPLETED BY STUDENT
-                # Here you should write line(s) to create a variable 'batch' containing 'self.batch_size' quadruplets 
                 batch = random.choices(self.exp_buffer, k = self.batch_size)
                 self.fn_reinforce(batch)
 
