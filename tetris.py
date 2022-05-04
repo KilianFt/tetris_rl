@@ -3,6 +3,7 @@ import pygame
 import h5py
 import gameboardClass
 import agentClass
+# agentClass = agentClass2
 
 PARAM_TASK1a=1
 PARAM_TASK1b=2
@@ -16,11 +17,11 @@ human_player=0
 # human_player=1
 
 # Choose parameter sets for different tasks
-# param_set=PARAM_TASK1a
+param_set=PARAM_TASK1a
 # param_set=PARAM_TASK1b
 # param_set=PARAM_TASK1c
 # param_set=PARAM_TASK1d
-param_set=PARAM_TASK2a
+# param_set=PARAM_TASK2a
 #param_set=PARAM_TASK2b
 
 # Use files to evaluate strategy

@@ -24,7 +24,7 @@ class TQAgent:
     def fn_init(self,gameboard):
         self.gameboard=gameboard
         self.q_tables = {}
-        self.initial_q_table_shape = {}
+        self.possible_tile_actions = {}
 
         self.reward_tots = np.zeros(self.episode_count)
 
@@ -35,9 +35,10 @@ class TQAgent:
 
             for or_idx in range(n_orientations):
                 n_positions = 1 + gameboard.N_col - len(tile[or_idx])
-                actions[or_idx] = np.zeros(n_positions)
+                actions[or_idx] = n_positions
 
-            self.initial_q_table_shape[i] = actions
+            self.possible_tile_actions[i] = actions
+
             self.q_tables[i] = {}
 
         self.cur_board_str = ''
@@ -46,14 +47,15 @@ class TQAgent:
 
 
     def fn_load_strategy(self,strategy_file):
-        pass
-        # TO BE COMPLETED BY STUDENT
-        # Here you can load the Q-table (to Q-table of self) from the input parameter strategy_file (used to test how the agent plays)
+        self.q_tables = np.load(strategy_file)
 
     def get_board_str(self):
         board_str = ''
         for x in self.gameboard.board.flatten():
-            board_str += str(x)
+            if x == 1.0:
+                board_str += str(1)
+            else:
+                board_str += str(0)
 
         return board_str
 
@@ -61,84 +63,83 @@ class TQAgent:
         self.board_str = self.get_board_str()
         self.tile_idx = self.gameboard.cur_tile_type
 
-    def get_q_table(self, board_str, tile_idx):
-        if board_str in self.q_tables[tile_idx]:
-            q_table = self.q_tables[tile_idx][board_str]
-        else:
-            # initialize new 0 q table
-            q_table = self.initial_q_table_shape[tile_idx]
-            self.q_tables[tile_idx][board_str] = copy.deepcopy(q_table)
-        return q_table
+    def get_possible_actions(self, tile_idx):
+        actions = []
+        poses = self.possible_tile_actions[tile_idx]
+        for o_idx, n_positions in poses.items():
+            for p_idx in range(n_positions):
+                actions.append((p_idx, o_idx))
 
-    def get_max_q(self, q_table):
-        q_max = None
-        
-        for positions in q_table.values():
-            curr_max = np.max(positions)
-            if q_max is None:
-                q_max = curr_max
-            if curr_max > q_max:
-                q_max = curr_max
+        return actions
 
-        return q_max
+    def get_action_rewards(self, actions, board_str):
+        rewards = {}
+        q_table = self.q_tables[self.tile_idx]
 
-    def get_best_actions(self, q_table):
-        max_q = self.get_max_q(q_table)
-        max_idxs = []
-        for o_idx, positions in q_table.items():
-            for p_idx, q_val in enumerate(positions):
-                if q_val == max_q:
-                    max_idxs.append((o_idx, p_idx))
+        for action in actions:
+            rewards[action] = 0.0
+            if board_str in q_table:
+                if action in q_table[board_str]:
+                    rewards[action] = q_table[board_str][action]
 
-        return max_idxs
+        return rewards
 
     def fn_select_action(self):
-        # Useful variables: 
-        # 'self.epsilon' parameter epsilon in epsilon-greedy policy
 
-        self.old_state = self.board_str
+        q_table = self.q_tables[self.tile_idx]
+        possible_actions = self.get_possible_actions(self.tile_idx)
 
-        # get q table for current state
-        q_table = self.get_q_table(self.board_str, self.tile_idx)
+        if not self.board_str in q_table:
+            self.action = random.choice(possible_actions)
 
-        max_idxs = self.get_best_actions(q_table)
-        n_max = len(max_idxs)
-        rand_idx = np.random.randint(0, n_max)
-
-        r = np.random.rand()
-        if r < self.epsilon:
-            # chose random action
-            o_len = len(q_table)
-            rand_o = np.random.randint(0, o_len)
-
-            p_len = len(q_table[rand_o])
-            rand_p = np.random.randint(0, p_len)
-
-            self.action = (rand_o, rand_p)
         else:
-            self.action = max_idxs[rand_idx]
+            rewards = self.get_action_rewards(possible_actions, self.board_str)
+            best_actions = []
+            max_reward = max(rewards.values())
+            for action, reward in rewards.items():
+                if reward >= max_reward:
+                    best_actions.append(action)
 
-        if self.gameboard.fn_move(self.action[1], self.action[0]) == 1:
+            if np.random.rand() < self.epsilon:
+                self.action = random.choice(possible_actions)
+            else:
+                self.action = random.choice(best_actions)
+
+        if self.gameboard.fn_move(self.action[0], self.action[1]) == 1:
             print("move invalid")
+
 
     def fn_reinforce(self,old_state,reward):
         last_board_str = old_state[0]
         last_tile_idx = old_state[1]
 
-        q_table_next_state = self.get_q_table(self.board_str, last_tile_idx)
-        max_next_state = self.get_max_q(q_table_next_state)
+        new_board_str = self.board_str
+        new_tile_idx = self.tile_idx
 
-        # get entry in q table of current state with current action
-        q_table_state = self.get_q_table(last_board_str, last_tile_idx)
+        action = self.action
 
-        q_state = q_table_state[self.action[0]][self.action[1]]
+        q_table_new_tile = self.q_tables[new_tile_idx]
+        q_table_last_tile = self.q_tables[last_tile_idx]
 
-        q_state_updated = q_state + self.alpha * (reward + max_next_state - q_state)
+        max_q_new_state = 0
+        if new_board_str in q_table_new_tile:
+            possible_actions = self.get_possible_actions(self.tile_idx)
+            rewards = self.get_action_rewards(possible_actions, self.board_str)
+            max_reward = max(rewards.values())
+            max_q_new_state = max_reward
 
-        self.q_tables[last_tile_idx][last_board_str][self.action[0]][self.action[1]] = copy.deepcopy(q_state_updated)
 
-        return
+        last_q_val = 0
+        if last_board_str in q_table_last_tile:
+            if action in q_table_last_tile[last_board_str]:
+                last_q_val = q_table_last_tile[last_board_str][action]
 
+        q_state_updated = last_q_val + self.alpha * (reward + max_q_new_state - last_q_val)
+
+        if last_board_str in q_table_last_tile:
+            q_table_last_tile[last_board_str][action] = q_state_updated
+        else:
+            q_table_last_tile[last_board_str] = {action: q_state_updated}
 
     def fn_turn(self):
         if self.gameboard.gameover:
@@ -148,8 +149,8 @@ class TQAgent:
             if self.episode%1000==0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    np.save('rewards.npy', self.reward_tots)
-                    np.save('q_tables.npy', self.q_tables)
+                    np.save((str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
+                    np.save((str(self.episode_count)+"_step_"+str(self.episode)+'_q_tables.npy'), self.q_tables)
                     
             if self.episode>=self.episode_count:
                 raise SystemExit(0)
