@@ -152,8 +152,8 @@ class TQAgent:
             if self.episode%1000==0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    np.save((str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
-                    np.save((str(self.episode_count)+"_step_"+str(self.episode)+'_q_tables.npy'), self.q_tables)
+                    np.save(("data/test_1c_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
+                    np.save(("data/test_1c_"+str(self.episode_count)+"_step_"+str(self.episode)+'_q_tables.npy'), self.q_tables)
                     
             if self.episode>=self.episode_count:
                 raise SystemExit(0)
@@ -239,11 +239,9 @@ class TDQNAgent:
         self.exp_buffer = []
         self.reward_tots = np.zeros(self.episode_count)
 
-
     def fn_load_strategy(self, strategy_file):
-        pass
-        # TO BE COMPLETED BY STUDENT
-        # Here you can load the Q-network (to Q-network of self) from the strategy_file
+        self.q_nn = torch.load(strategy_file)
+        self.q_nn_hat = copy.deepcopy(self.q_nn)
 
     def fn_read_state(self):
         self.board = self.gameboard.board.flatten()
@@ -358,9 +356,10 @@ class TDQNAgent:
             if self.episode % 1000 == 0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    pass
-                    # TO BE COMPLETED BY STUDENT
-                    # Here you can save the rewards and the Q-network to data files
+                    np.save(("data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
+                    model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn"
+                    torch.save(self.q_nn, model_save_dir)
+
             if self.episode>=self.episode_count:
                 raise SystemExit(0)
             else:

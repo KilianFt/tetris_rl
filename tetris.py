@@ -26,10 +26,12 @@ param_set=PARAM_TASK2a
 # Use files to evaluate strategy
 # If you change 'strategy_file' to the location of a file containing a stored Q-table or Q-network, you can evaluate the success of the found strategy
 if param_set==PARAM_TASK1a:
-    strategy_file=''
+    strategy_file='data/1a_1000_step_1000_q_tables.npy'
 elif param_set==PARAM_TASK1b:
-    strategy_file=''
+    strategy_file='data/1b_10000_step_10000_q_tables.npy'
 elif param_set==PARAM_TASK1c:
+    strategy_file='data/1c_200000_step_200000_q_tables.npy'
+elif param_set==PARAM_TASK1d:
     strategy_file=''
 elif param_set==PARAM_TASK2a:
     strategy_file=''
