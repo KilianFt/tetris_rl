@@ -179,11 +179,13 @@ class Net(nn.Module):
     def __init__(self, state_size, action_size, hidden_size):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(state_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, action_size)
+        self.fc2 = nn.Linear(hidden_size, int(hidden_size/2))
+        self.fc3 = nn.Linear(int(hidden_size/2), action_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
         return x
 
 def criterion(q_val, y):
@@ -214,7 +216,7 @@ class TDQNAgent:
         self.action_size = action_size
         self.state_size = state_size
         print("state size", state_size)
-        hidden_size = 64
+        hidden_size = 128
 
         self.q_nn = Net(state_size = state_size, action_size = action_size, hidden_size = hidden_size)
         print(self.q_nn)
@@ -310,7 +312,6 @@ class TDQNAgent:
         output = self.q_nn(old_states)
         output_hat = self.q_nn_hat(new_states)
         
-        targets = torch.Tensor(self.batch_size, self.action_size)
         target_vals = torch.Tensor(self.batch_size, 1)
         output_vals = torch.Tensor(self.batch_size, 1)
 
@@ -321,24 +322,14 @@ class TDQNAgent:
             
             if reward == -100:
                 target_reward = reward
-                # target_list = [reward if i == reward_pos else 0 for i in range(len(output[i]))]
-                # target = torch.Tensor(target_list)
-                out_hat[reward_pos] += reward
+
             else:
                 
                 max_q_nn_hat = np.max(out_hat.detach().numpy())
                 target_reward = reward + max_q_nn_hat
 
-                out_hat[reward_pos] += target_reward
-
             target_vals[i] = target_reward
             output_vals[i] = output[i][reward_pos]
-            target = out_hat
-            targets[i] = target
-
-        # print("reward", rewards[0])
-        # print("output", output[0])
-        # print("target", targets[0])
 
         loss = criterion(output_vals, target_vals)
         loss.mean().backward()
@@ -353,8 +344,8 @@ class TDQNAgent:
             if self.episode % 1000 == 0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    np.save(("data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
-                    model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn.pt"
+                    np.save(("data/test_2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
+                    model_save_dir = "data/test_2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn.pt"
                     torch.save(self.q_nn, model_save_dir)
 
             if self.episode>=self.episode_count:
@@ -385,13 +376,13 @@ class TDQNAgent:
                 'reward': reward,
                 'new_state': new_state}
 
-            if self.episode < self.replay_buffer_size:
+            if len(self.exp_buffer) < self.replay_buffer_size:
                 self.exp_buffer.append(copy.deepcopy(quadruplet))
             else:
                 self.exp_buffer.pop(0)
                 self.exp_buffer.append(copy.deepcopy(quadruplet))
 
-                print("ERROR wrong buffer size") if not len(self.exp_buffer) == self.replay_buffer_size else 0
+                print("ERROR wrong buffer size: ", len(self.exp_buffer)) if not len(self.exp_buffer) == self.replay_buffer_size else 0
 
             if len(self.exp_buffer) >= self.replay_buffer_size:
                 batch = random.choices(self.exp_buffer, k = self.batch_size)
