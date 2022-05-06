@@ -179,13 +179,13 @@ class Net(nn.Module):
     def __init__(self, state_size, action_size, hidden_size):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(state_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, int(hidden_size/2))
-        self.fc3 = nn.Linear(int(hidden_size/2), action_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, action_size)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        # x = F.relu(self.fc2(x))
+        x = self.fc3(x)
         return x
 
 def criterion(q_val, y):
@@ -272,7 +272,6 @@ class TDQNAgent:
             with torch.no_grad():
                 output = self.q_nn(self.state)
 
-            # FIXME make sure that all top are taken randomely
             max_idxs = np.flip(np.argsort(output.detach().numpy()))
             for idx in max_idxs:
                 o_idx = idx % self.gameboard.N_col
@@ -283,17 +282,6 @@ class TDQNAgent:
 
 
     def fn_reinforce(self, batch):
-        # TO BE COMPLETED BY STUDENT
-        # This function should be written by you
-        # Instructions:
-        # Update the Q network using a batch of quadruplets (old state, last action, last reward, new state)
-        # Calculate the loss function by first, for each old state, use the Q-network to calculate the values Q(s_old,a), i.e. the estimate of the future reward for all actions a
-        # Then repeat for the target network to calculate the value \hat Q(s_new,a) of the new state (use \hat Q=0 if the new state is terminal)
-        # This function should not return a value, the Q table is stored as an attribute of self
-
-        # Useful variables: 
-        # The input argument 'batch' contains a sample of quadruplets used to update the Q-network
-
         # in your training loop:
         actions = []
         rewards = []
@@ -314,25 +302,36 @@ class TDQNAgent:
         
         target_vals = torch.Tensor(self.batch_size, 1)
         output_vals = torch.Tensor(self.batch_size, 1)
+        # targets = torch.Tensor(self.batch_size, self.action_size)
+
+        targets = torch.clone(output)
 
         for i, (action, reward) in enumerate(zip(actions, rewards)):
             reward_pos = action[0] * self.gameboard.N_col + action[1]
             # find out if state is terminal state
             out_hat = output_hat[i]
             
+            # FIXME should also consider case of 50 rounds
             if reward == -100:
                 target_reward = reward
 
             else:
                 
-                max_q_nn_hat = np.max(out_hat.detach().numpy())
+                max_q_nn_hat = torch.max(out_hat)
                 target_reward = reward + max_q_nn_hat
 
             target_vals[i] = target_reward
             output_vals[i] = output[i][reward_pos]
 
-        loss = criterion(output_vals, target_vals)
-        loss.mean().backward()
+            targets[i][reward_pos] = target_reward
+
+        # target_vals.requires_grad = True
+        # output_vals.requires_grad = True
+
+        # loss = criterion(output, targets)
+        loss = self.criterion(output, targets)
+        # loss.mean().backward()
+        loss.backward()
 
         self.optimizer.step()
 

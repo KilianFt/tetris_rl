@@ -123,7 +123,7 @@ elif param_set==PARAM_TASK2a:
 
     alpha=0.001
     epsilon=0.001
-    episode_count=10000
+    episode_count=15000
 
     epsilon_scale=5000
     replay_buffer_size=10000
