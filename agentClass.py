@@ -340,11 +340,8 @@ class TDQNAgent:
         # print("output", output[0])
         # print("target", targets[0])
 
-        # loss = self.criterion(output_vals, target_vals)
         loss = criterion(output_vals, target_vals)
-        # print("loss", loss)
         loss.mean().backward()
-        # loss.backward()
 
         self.optimizer.step()
 
@@ -357,7 +354,7 @@ class TDQNAgent:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
                     np.save(("data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
-                    model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn"
+                    model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn.pt"
                     torch.save(self.q_nn, model_save_dir)
 
             if self.episode>=self.episode_count:
