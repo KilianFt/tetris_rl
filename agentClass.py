@@ -216,25 +216,37 @@ class TDQNAgent:
         print("state size", state_size)
         hidden_size = 64
 
-        self.q_nn = Net(state_size = state_size, action_size = action_size, hidden_size = hidden_size)
-        print(self.q_nn)
-
-        self.q_nn_hat = copy.deepcopy(self.q_nn)
-
-        learning_rate = 1e-4
-        self.optimizer = optim.Adam(self.q_nn.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
+
+        self.qnns = {}
+        self.optimizers = {}
 
         possible_actions = {}
         for i, tile in enumerate(gameboard.tiles):
             tile_actions = {}
-            for o_idx in range(len(tile)):
+            cur_tile_idx = 0
+            n_tile_actions = 0
+            n_orientations = len(tile)
+            for o_idx in range(n_orientations):
                 n_positions = 1 + gameboard.N_col - len(tile[o_idx])
-                tile_actions[o_idx] = n_positions
+                for p_idx in range(n_positions):
+                    tile_actions[cur_tile_idx] = (p_idx, o_idx)
+                    cur_tile_idx += 1
+                n_tile_actions += n_positions
 
             possible_actions[i] = tile_actions
 
+            tile_qnn = Net(state_size = state_size,
+                            action_size = n_tile_actions,
+                            hidden_size = hidden_size)
+            self.qnns[i] = tile_qnn
+            self.optimizers[i] = optim.Adam(tile_qnn.parameters())
+
+            if not len(tile_actions) == n_tile_actions:
+                print("some length not correct")
+
         self.possible_actions = possible_actions
+        self.qnns_hat = copy.deepcopy(self.qnns)
 
         self.exp_buffer = []
         self.reward_tots = np.zeros(self.episode_count)
@@ -260,23 +272,33 @@ class TDQNAgent:
         r = np.random.rand()
         if r < curr_epsilon:
             # chose random action
-            o_rand = np.random.randint(0, len(tile_actions))
-            p_rand = np.random.randint(0, tile_actions[o_rand])
+            rand_idx = np.random.randint(0, len(tile_actions))
+            # p_rand = np.random.randint(0, tile_actions[o_rand])
+            p_rand, o_rand = self.possible_actions[self.tile_idx][rand_idx]
             self.action = (p_rand, o_rand)
+            self.action_qnn_idx = rand_idx
             self.gameboard.fn_move(p_rand, o_rand)
 
         else:
             # chose action with highest q_val
             with torch.no_grad():
-                output = self.q_nn(self.state)
+                output = self.qnns[self.tile_idx](self.state)
 
             # FIXME make sure that all top are taken randomely
-            max_idxs = np.flip(np.argsort(output.detach().numpy()))
+            out_np = output.detach().numpy()
+            out_max = np.max(out_np)
+            n_max = np.where(out_np == out_max)
+            if not len(n_max) == 1:
+                print("max length is", len(n_max[0]))
+
+            max_idxs = np.flip(np.argsort(out_np))
             for idx in max_idxs:
-                o_idx = idx % self.gameboard.N_col
-                p_idx = idx // self.gameboard.N_col
+                # o_idx = idx % self.gameboard.N_col
+                # p_idx = idx // self.gameboard.N_col
+                p_idx, o_idx = self.possible_actions[self.tile_idx][idx]
                 if not self.gameboard.fn_move(p_idx, o_idx) == 1:
                     self.action = (p_idx, o_idx)
+                    self.action_qnn_idx = idx
                     break
 
 
@@ -293,60 +315,66 @@ class TDQNAgent:
         # The input argument 'batch' contains a sample of quadruplets used to update the Q-network
 
         # in your training loop:
-        actions = []
-        rewards = []
-        old_states = torch.Tensor(self.batch_size, self.state_size)
-        new_states = torch.Tensor(self.batch_size, self.state_size)
+        # actions = []
+        # rewards = []
+        # old_tile_idxs = []
+        # old_states = torch.Tensor(self.batch_size, self.state_size)
+        # new_states = torch.Tensor(self.batch_size, self.state_size)
+
         for i, entry in enumerate(batch):
-            rewards.append(entry['reward'])
-            old_state = entry['old_state']
-            new_state = entry['new_state']
-            actions.append(entry['action'])
-            old_states[i] = old_state
-            new_states[i] = new_state
+            # rewards.append(entry['reward'])
+            # actions.append(entry['action'])
+            # old_tile_idxs.append(entry['old_tile_idx'])
 
-        self.optimizer.zero_grad()
+            # old_state = entry['old_state']
+            # new_state = entry['new_state']
+            # old_states[i] = old_state
+            # new_states[i] = new_state
 
-        output = self.q_nn(old_states)
-        output_hat = self.q_nn_hat(new_states)
+            self.optimizers[entry['old_tile_idx']].zero_grad()
+
+            output = self.qnns[entry['old_tile_idx']](entry['old_state'])
+            output_hat = self.qnns_hat[entry['old_tile_idx']](entry['new_state'])
         
-        targets = torch.Tensor(self.batch_size, self.action_size)
-        target_vals = torch.Tensor(self.batch_size, 1)
-        output_vals = torch.Tensor(self.batch_size, 1)
+            targets = torch.Tensor(self.batch_size, self.action_size)
+            target_rewardtarget_vals = torch.Tensor(self.batch_size, 1)
+            output_vals = torch.Tensor(self.batch_size, 1)
 
-        for i, (action, reward) in enumerate(zip(actions, rewards)):
-            reward_pos = action[0] * self.gameboard.N_col + action[1]
+        # for i, (action, reward) in enumerate(zip(actions, rewards)):
+            reward_pos = entry['old_action_qnn_idx']
             # find out if state is terminal state
-            out_hat = output_hat[i]
+            # out_hat = output_hat[i]
             
-            if reward == -100:
-                target_reward = reward
+            if entry['reward'] == -100:
+                target_reward = entry['reward']
                 # target_list = [reward if i == reward_pos else 0 for i in range(len(output[i]))]
                 # target = torch.Tensor(target_list)
-                out_hat[reward_pos] += reward
+                output_hat[reward_pos] += entry['reward']
             else:
-                
-                max_q_nn_hat = np.max(out_hat.detach().numpy())
-                target_reward = reward + max_q_nn_hat
+                max_q_nn_hat = np.max(output_hat.detach().numpy())
+                target_reward = entry['reward'] + max_q_nn_hat
 
-                out_hat[reward_pos] += target_reward
+                output_hat[reward_pos] += target_reward
 
-            target_vals[i] = target_reward
-            output_vals[i] = output[i][reward_pos]
-            target = out_hat
-            targets[i] = target
+            # target_vals[i] = target_reward
+            # output_vals[i] = output[i][reward_pos]
+            # target = output_hat
+            # targets[i] = target
 
-        # print("reward", rewards[0])
-        # print("output", output[0])
-        # print("target", targets[0])
+            # print("reward", rewards[0])
+            # print("output", output[0])
+            # print("target", targets[0])
 
-        # loss = self.criterion(output_vals, target_vals)
-        loss = criterion(output_vals, target_vals)
-        # print("loss", loss)
-        loss.mean().backward()
-        # loss.backward()
+            # loss = self.criterion(output, targets)
+            # loss = self.criterion(output, target_reward)
+            # loss = criterion(output_vals, target_vals)
+            loss = criterion(output, target_reward)
 
-        self.optimizer.step()
+            # print("loss", loss)
+            # loss.mean().backward()
+            loss.mean().backward()
+
+            self.optimizers[entry['old_tile_idx']].step()
 
     def fn_turn(self):
         if self.gameboard.gameover:
@@ -356,15 +384,16 @@ class TDQNAgent:
             if self.episode % 1000 == 0:
                 saveEpisodes=[1000,2000,5000,10000,20000,50000,100000,200000,500000,1000000];
                 if self.episode in saveEpisodes:
-                    np.save(("data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
-                    model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn"
-                    torch.save(self.q_nn, model_save_dir)
+                    # np.save(("data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+'_rewards.npy'), self.reward_tots)
+                    # model_save_dir = "data/2a_"+str(self.episode_count)+"_step_"+str(self.episode)+"_qnn.pt"
+                    # torch.save(self.q_nn, model_save_dir)
+                    pass
 
             if self.episode>=self.episode_count:
                 raise SystemExit(0)
             else:
                 if (len(self.exp_buffer) >= self.replay_buffer_size) and ((self.episode % self.sync_target_episode_count)==0):
-                    self.q_nn_hat = copy.deepcopy(self.q_nn)
+                    self.qnns_hat = copy.deepcopy(self.qnns)
 
                 self.gameboard.fn_restart()
         else:
@@ -372,7 +401,8 @@ class TDQNAgent:
             self.fn_select_action()
 
             old_state = copy.deepcopy(self.state)
-
+            old_tile_idx = copy.deepcopy(self.tile_idx)
+            old_action_qnn_idx = copy.deepcopy(self.action_qnn_idx)
             # Drop the tile on the game board
             reward = self.gameboard.fn_drop()
 
@@ -386,7 +416,9 @@ class TDQNAgent:
             quadruplet = {'old_state': old_state,
                 'action': action,
                 'reward': reward,
-                'new_state': new_state}
+                'new_state': new_state,
+                'old_tile_idx': old_tile_idx,
+                'old_action_qnn_idx': old_action_qnn_idx}
 
             if self.episode < self.replay_buffer_size:
                 self.exp_buffer.append(copy.deepcopy(quadruplet))
